@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APS Map Viewer — Espinosa MG</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;600;700;900&display=swap');
+
+  :root {
+    --bg:       #060d1a;
+    --surface:  #0d1829;
+    --panel:    #111f35;
+    --border:   #1e3050;
+    --accent:   #38bdf8;
+    --accent2:  #818cf8;
+    --success:  #34d399;
+    --warn:     #fbbf24;
+    --danger:   #f87171;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --sidebar-w:320px;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+  }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: var(--sidebar-w);
+    min-width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width .3s, min-width .3s;
+    position: relative;
+    z-index: 100;
+  }
+  #sidebar.collapsed { width:0; min-width:0; }
+
+  #sidebarToggle {
+    position: fixed;
+    top: 50%;
+    left: var(--sidebar-w);
+    transform: translateY(-50%);
+    width: 22px; height: 64px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: none;
+    border-radius: 0 10px 10px 0;
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 13px;
+    display: flex; align-items:center; justify-content:center;
+    z-index: 500;
+    transition: left .3s;
+  }
+  #sidebar.collapsed ~ #sidebarToggle,
+  body.collapsed #sidebarToggle {
+    left: 0;
+  }
+
+  .sidebar-header {
+    padding: 18px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .sidebar-header h1 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -.3px;
+  }
+  .sidebar-header p {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .sidebar-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* ── CARREGAR ARQUIVO ── */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    background: var(--panel);
+  }
+  .drop-zone:hover, .drop-zone.over {
+    border-color: var(--accent);
+    background: rgba(56,189,248,.06);
+  }
+  .drop-zone .dz-icon { font-size: 28px; margin-bottom: 6px; }
+  .drop-zone p { font-size: 12px; color: var(--muted); }
+  .drop-zone b { color: var(--text); }
+
+  /* ── CARDS DE INFO ── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .info-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+  }
+  .info-card .v {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-family: 'DM Mono', monospace;
+  }
+  .info-card .l {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-top: 2px;
+  }
+
+  /* ── SEÇÃO ── */
+  .section { display: flex; flex-direction: column; gap: 6px; }
+  .section-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    padding: 0 2px;
+  }
+
+  /* ── MICROÁREA ITEM ── */
+  .micro-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .micro-item::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--micro-color, #888);
+    border-radius: 3px 0 0 3px;
+  }
+  .micro-item:hover { background: rgba(255,255,255,.04); }
+  .micro-item.hidden { opacity: .35; }
+  .micro-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .micro-label { flex: 1; font-size: 11px; font-weight: 600; }
+  .micro-count {
+    font-size: 9px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+  .micro-eye {
+    font-size: 13px;
+    opacity: .6;
+    transition: opacity .1s;
+  }
+  .micro-eye:hover { opacity: 1; }
+
+  /* ── BOTÕES ── */
+  .btn {
+    width: 100%;
+    border: none;
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter .15s, transform .1s;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    letter-spacing: .2px;
+  }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:active { transform: scale(.97); }
+  .btn-primary  { background: var(--accent); color: #000; }
+  .btn-secondary{ background: var(--panel); border: 1px solid var(--border); }
+  .btn-purple   { background: var(--accent2); }
+  .btn-green    { background: var(--success); color: #000; }
+  .btn-row { display: flex; gap: 6px; }
+  .btn-row .btn { flex: 1; }
+
+  /* ── SWITCHES ── */
+  .switch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .switch-row input { accent-color: var(--accent); }
+
+  /* ── SEARCH ── */
+  .search-box {
+    position: relative;
+  }
+  .search-box input {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px 7px 28px;
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--text);
+    outline: none;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-box::before {
+    content: '🔍';
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+  }
+
+  /* ── MAPA ── */
+  #map-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  #map { width: 100%; height: 100%; }
+
+  /* ── TOOLBAR FLUTUANTE ── */
+  #toolbar {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    gap: 6px;
+    background: rgba(6,13,26,.88);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 6px 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  }
+  .tool-btn {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    font-weight: 600;
+    transition: all .15s;
+    white-space: nowrap;
+    display: flex; align-items:center; gap:5px;
+  }
+  .tool-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+  .tool-btn.active { background: rgba(56,189,248,.15); color: var(--accent); }
+  .tool-sep { width: 1px; background: var(--border); margin: 4px 0; }
+
+  /* ── LEGENDA ── */
+  #mapLegend {
+    position: absolute;
+    bottom: 28px;
+    right: 12px;
+    z-index: 900;
+    background: rgba(6,13,26,.9);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    max-height: 40vh;
+    overflow-y: auto;
+    min-width: 110px;
+    backdrop-filter: blur(8px);
+    font-size: 10px;
+    display: none;
+  }
+  .legend-team { color: var(--accent); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; margin: 6px 0 3px; border-bottom: 1px solid var(--border); padding-bottom: 2px; }
+  .legend-row { display: flex; align-items:center; gap:5px; margin: 2px 0; cursor: pointer; }
+  .legend-row:hover { opacity: .8; }
+  .legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .legend-lbl { color: var(--text); font-size: 9px; }
+
+  /* ── TOOLTIP DO PONTO ── */
+  .leaflet-tooltip {
+    background: rgba(6,13,26,.95) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    color: var(--text) !important;
+    font-family: 'Outfit', sans-serif !important;
+    font-size: 11px !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,.6) !important;
+    padding: 6px 10px !important;
+  }
+  .leaflet-tooltip::before { border-top-color: rgba(6,13,26,.95) !important; }
+
+  /* ── INFO POPUP AO CLICAR ── */
+  #infoPanel {
+    position: absolute;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 900;
+    background: rgba(6,13,26,.95);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 12px 16px;
+    min-width: 260px;
+    max-width: 360px;
+    display: none;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  }
+  #infoPanel .ip-title { color: var(--accent); font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+  #infoPanel .ip-row { display:flex; justify-content:space-between; font-size:10px; margin:2px 0; }
+  #infoPanel .ip-key { color: var(--muted); }
+  #infoPanel .ip-val { color: var(--text); font-weight:600; text-align:right; max-width:180px; word-break:break-word; }
+  #infoPanel button { margin-top:8px; }
+
+  /* ── ESTADO VAZIO ── */
+  #emptyState {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--muted);
+    pointer-events: none;
+    background: linear-gradient(135deg, rgba(56,189,248,.03), rgba(129,140,248,.03));
+  }
+  #emptyState .es-icon { font-size: 64px; opacity: .3; }
+  #emptyState p { font-size: 14px; }
+
+  /* ── LOADING ── */
+  #loadingBar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    z-index: 2000;
+    display: none;
+    animation: barAnim 1.5s ease infinite;
+  }
+  @keyframes barAnim {
+    0%   { opacity:1; transform:scaleX(0); transform-origin:left; }
+    50%  { opacity:1; transform:scaleX(1); transform-origin:left; }
+    51%  { transform-origin:right; }
+    100% { opacity:0; transform:scaleX(0); transform-origin:right; }
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="loadingBar"></div>
+
+<!-- SIDEBAR -->
+<div id="sidebar">
+  <div class="sidebar-header">
+    <h1>🔭 APS Map Viewer</h1>
+    <p id="projectTitle">Nenhum projeto carregado</p>
+  </div>
+
+  <div class="sidebar-body">
+
+    <!-- Carregar arquivo -->
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <div class="dz-icon">📂</div>
+      <b>Abrir projeto</b>
+      <p>Clique ou arraste o arquivo <code>.json</code></p>
+    </div>
+    <input type="file" id="fileInput" accept=".json" style="display:none">
+
+    <!-- Estatísticas -->
+    <div class="info-grid" id="statsGrid" style="display:none">
+      <div class="info-card"><div class="v" id="statPts">0</div><div class="l">Pontos</div></div>
+      <div class="info-card"><div class="v" id="statGeo">0</div><div class="l">Geocodificados</div></div>
+      <div class="info-card"><div class="v" id="statMicros">0</div><div class="l">Microáreas</div></div>
+      <div class="info-card"><div class="v" id="statTeams">0</div><div class="l">Equipes</div></div>
+    </div>
+
+    <!-- Buscar localidade -->
+    <div class="section" id="searchSection" style="display:none">
+      <div class="section-title">🔍 Buscar</div>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Nome da localidade ou endereço...">
+      </div>
+      <div id="searchResults" style="display:none; max-height:120px; overflow-y:auto; margin-top:4px;"></div>
+    </div>
+
+    <!-- Camadas -->
+    <div class="section" id="layersSection" style="display:none">
+      <div class="section-title">👁️ Camadas</div>
+      <label class="switch-row"><input type="checkbox" id="chkSat" checked onchange="toggleSat(this.checked)"> 🛰️ Satélite</label>
+      <label class="switch-row"><input type="checkbox" id="chkPoints" checked onchange="togglePoints(this.checked)"> 🔵 Pontos</label>
+      <label class="switch-row"><input type="checkbox" id="chkPerims" checked onchange="togglePerims(this.checked)"> ⬡ Perímetros</label>
+      <label class="switch-row"><input type="checkbox" id="chkIbge" checked onchange="toggleIbge(this.checked)"> 🗺️ Malha IBGE</label>
+      <label class="switch-row"><input type="checkbox" id="chkLandmarks" checked onchange="toggleLandmarks(this.checked)"> 🏥 Referências</label>
+      <label class="switch-row"><input type="checkbox" id="chkLabels" checked onchange="toggleLabels(this.checked)"> 🏷️ Nomes</label>
+    </div>
+
+    <!-- Ações -->
+    <div class="section" id="actionsSection" style="display:none">
+      <div class="section-title">⚡ Ações</div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="fitAll()">🗺️ Ver tudo</button>
+        <button class="btn btn-secondary" onclick="toggleAllMicros(true)">👁️ Todas</button>
+        <button class="btn btn-secondary" onclick="toggleAllMicros(false)">🙈 Nenhuma</button>
+      </div>
+      <button class="btn btn-green" onclick="captureMap()">📸 Exportar PNG</button>
+    </div>
+
+    <!-- Microáreas -->
+    <div class="section" id="microsSection" style="display:none">
+      <div class="section-title">🎨 Microáreas</div>
+      <div id="microList"></div>
+    </div>
+
+  </div><!-- /sidebar-body -->
+</div><!-- /sidebar -->
+
+<!-- BOTÃO TOGGLE SIDEBAR (fora da sidebar, sempre visível) -->
+<button id="sidebarToggle" title="Recolher/Expandir menu">◀</button>
+
+<!-- MAPA -->
+<div id="map-container">
+  <div id="loadingBar"></div>
+
+  <!-- Toolbar flutuante -->
+  <div id="toolbar" style="display:none">
+    <button class="tool-btn active" id="tbSat" onclick="setTile('sat')">🛰️ Satélite</button>
+    <button class="tool-btn" id="tbStreet" onclick="setTile('street')">🗺️ Ruas</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" onclick="fitAll()">⤢ Ver tudo</button>
+    <button class="tool-btn" id="tbLegend" onclick="toggleLegend()">📋 Legenda</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" onclick="captureMap()">📸 PNG</button>
+  </div>
+
+  <!-- Legenda flutuante -->
+  <div id="mapLegend"></div>
+
+  <!-- Info panel (clique no ponto) -->
+  <div id="infoPanel">
+    <div class="ip-title">📍 Informações do ponto</div>
+    <div id="infoPanelRows"></div>
+    <button class="btn btn-secondary" onclick="document.getElementById('infoPanel').style.display='none'" style="width:100%;margin-top:8px;font-size:10px;padding:6px">✕ Fechar</button>
+  </div>
+
+  <!-- Estado vazio -->
+  <div id="emptyState">
+    <div class="es-icon">🗺️</div>
+    <p>Abra um projeto <b>.json</b> para visualizar</p>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════
+   APS MAP VIEWER — Visualizador standalone
+   Lê arquivos .json do Sistema de Mapeamento APS
+   ═══════════════════════════════════════════ */
+
+let P = null;         /* Projeto carregado */
+let map, tileSat, tileStreet;
+let layerPoints, layerPerims, layerIbge, layerLandmarks, layerLabels;
+let showLegend = false;
+const microVisible = {};
+
+/* OBS_CONFIG para perímetros e obstáculos */
+const OBS_CFG = {
+  rio:{cor:'#0ea5e9',tipo:'linha',peso:4},
+  rodovia:{cor:'#f59e0b',tipo:'linha',peso:4},
+  ferrovia:{cor:'#6b7280',tipo:'linha',peso:3,dash:'10,6'},
+  montanha:{cor:'#78716c',tipo:'poligono',peso:2},
+  mata:{cor:'#16a34a',tipo:'poligono',peso:2},
+  outro:{cor:'#a855f7',tipo:'linha',peso:3},
+  perimetro:{cor:'#2563eb',tipo:'poligono',peso:2,dash:'8,5'}
+};
+
+const LM_CFG = {
+  ubs:'🏥', escola:'🏫', igreja:'⛪', praca:'🏛️',
+  campo:'⚽', cemiterio:'🪦', comercio:'🏪', outro:'📍'
+};
+
+/* ── MAPA ── */
+map = L.map('map', { zoomControl:false, maxZoom:21 })
+        .setView([-14.93, -42.82], 10);
+L.control.zoom({ position:'bottomleft' }).addTo(map);
+
+tileStreet = L.tileLayer(
+  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  { maxZoom:21, attribution:'© OSM © CARTO' }
+);
+tileSat = L.tileLayer(
+  'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+  { maxZoom:21, attribution:'© Google' }
+).addTo(map);
+
+layerPoints    = L.layerGroup().addTo(map);
+layerPerims    = L.layerGroup().addTo(map);
+layerIbge      = L.layerGroup().addTo(map);
+layerLandmarks = L.layerGroup().addTo(map);
+layerLabels    = L.layerGroup().addTo(map);
+
+/* Fechar infoPanel ao clicar no mapa */
+map.on('click', ()=> document.getElementById('infoPanel').style.display='none');
+
+/* ── CARREGAR ARQUIVO ── */
+document.getElementById('fileInput').onchange = e => loadFile(e.target.files[0]);
+
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', ()=> dz.classList.remove('over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('over');
+  loadFile(e.dataTransfer.files[0]);
+});
+
+function loadFile(file) {
+  if(!file) return;
+  setLoading(true);
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      P = JSON.parse(e.target.result);
+      initProject();
+    } catch(err) {
+      alert('❌ Arquivo JSON inválido: ' + err.message);
+    }
+    setLoading(false);
+  };
+  reader.readAsText(file);
+}
+
+function setLoading(v) {
+  const bars = document.querySelectorAll('#loadingBar');
+  bars.forEach(b => b.style.display = v ? 'block' : 'none');
+}
+
+/* ── INICIALIZAR PROJETO ── */
+function initProject() {
+  if(!P) return;
+
+  /* Restaurar Map das microáreas */
+  P.microareasMap = new Map(P.microareas || []);
+
+  /* Visibilidade inicial */
+  P.microareasMap.forEach((v, k) => microVisible[k] = true);
+
+  /* UI */
+  const teams = [...new Set((P.data||[]).map(d=>d.team).filter(Boolean))];
+  document.getElementById('projectTitle').textContent =
+    teams.length ? teams.join(' + ') : 'Projeto sem nome';
+
+  const geo = (P.data||[]).filter(d=>d.geocoded).length;
+  document.getElementById('statPts').textContent    = (P.data||[]).length;
+  document.getElementById('statGeo').textContent    = geo;
+  document.getElementById('statMicros').textContent = P.microareasMap.size;
+  document.getElementById('statTeams').textContent  = teams.length || 1;
+
+  /* Mostrar seções */
+  ['statsGrid','searchSection','layersSection','actionsSection','microsSection'].forEach(id => {
+    document.getElementById(id).style.display = id === 'statsGrid' ? 'grid' : 'flex';
+  });
+  document.getElementById('toolbar').style.display = 'flex';
+  document.getElementById('emptyState').style.display = 'none';
+
+  /* Renderizar */
+  renderMicroList();
+  renderAll();
+  fitAll();
+  renderLegendContent();
+
+  /* Busca */
+  initSearch();
+}
+
+/* ── RENDERIZAÇÃO ── */
+function renderAll() {
+  layerPoints.clearLayers();
+  layerPerims.clearLayers();
+  layerIbge.clearLayers();
+  layerLandmarks.clearLayers();
+  layerLabels.clearLayers();
+
+  renderPoints();
+  renderDrawings();
+  renderIbge();
+  renderLandmarks();
+  renderLabels();
+}
+
+/* Pontos */
+function renderPoints() {
+  const pts = (P.data||[]).filter(p => p.geocoded && p.latitude && microVisible[p.microarea] !== false);
+
+  /* Agrupar sobrepostos */
+  const PX = 12;
+  const used = new Set();
+  const groups = [];
+  pts.forEach((p,i) => {
+    if(used.has(i)) return;
+    const pi = map.latLngToContainerPoint([p.latitude, p.longitude]);
+    const grp = [p]; used.add(i);
+    pts.forEach((q,j) => {
+      if(used.has(j)) return;
+      const pj = map.latLngToContainerPoint([q.latitude, q.longitude]);
+      if(Math.hypot(pi.x-pj.x, pi.y-pj.y) < PX) { grp.push(q); used.add(j); }
+    });
+    groups.push(grp);
+  });
+
+  groups.forEach(grp => {
+    const p0 = grp[0];
+    const mInfo = P.microareasMap.get(p0.microarea);
+    const color = mInfo ? mInfo.color : '#888';
+    const multi = grp.length > 1;
+    const sz = multi ? 20 : 10;
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="
+        width:${sz}px;height:${sz}px;border-radius:50%;
+        background:${color};border:2px solid rgba(255,255,255,.8);
+        box-shadow:0 2px 8px rgba(0,0,0,.5);
+        display:flex;align-items:center;justify-content:center;
+        font-size:9px;font-weight:900;color:white;cursor:pointer">
+        ${multi ? grp.length : ''}</div>`,
+      iconSize: [sz, sz], iconAnchor: [sz/2, sz/2]
+    });
+
+    const marker = L.marker([p0.latitude, p0.longitude], { icon });
+
+    /* Tooltip ao hover */
+    const addr = p0.address ? p0.address.split('|')[0].split(',')[0] : '—';
+    const micro = p0.microarea || '—';
+    const team  = p0.team || '—';
+    marker.bindTooltip(
+      `<b style="color:#38bdf8">${addr}</b><br>` +
+      `<span style="color:#818cf8">Micro ${micro}</span>` +
+      (team && team !== '—' ? `<br><span style="color:#64748b">${team}</span>` : '') +
+      (multi ? `<br><b style="color:#fbbf24">${grp.length} pontos sobrepostos</b>` : ''),
+      { direction:'top', offset:[0,-(sz/2+2)] }
+    );
+
+    /* Clique: abrir painel de info */
+    marker.on('click', e => {
+      L.DomEvent.stopPropagation(e);
+      showInfo(grp);
+    });
+
+    marker.addTo(layerPoints);
+  });
+
+  /* Re-renderizar ao zoom */
+  map.off('zoomend', renderPoints);
+  map.on('zoomend', renderPoints);
+}
+
+/* Mostrar info do ponto */
+function showInfo(group) {
+  const panel = document.getElementById('infoPanel');
+  const rows  = document.getElementById('infoPanelRows');
+  rows.innerHTML = '';
+  const p = group[0];
+  const items = [
+    ['Endereço', p.address ? p.address.split('|')[0] : '—'],
+    ['Microárea', p.microarea || '—'],
+    ['Equipe',    p.team || '—'],
+    ['Lat / Lng', p.latitude ? `${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}` : '—'],
+    ['Fonte',     p.source || '—'],
+  ];
+  if(group.length > 1) items.push(['Total sobrepostos', group.length]);
+  items.forEach(([k,v]) => {
+    const row = document.createElement('div');
+    row.className = 'ip-row';
+    row.innerHTML = `<span class="ip-key">${k}</span><span class="ip-val">${v}</span>`;
+    rows.appendChild(row);
+  });
+  panel.style.display = 'block';
+}
+
+/* Perímetros e obstáculos */
+function renderDrawings() {
+  (P.drawings||[]).forEach(d => {
+    const cfg = OBS_CFG[d.tipo] || OBS_CFG.outro;
+    const isPoly = cfg.tipo === 'poligono';
+
+    /* Cor: perimetro herda da micro */
+    let cor = d.cor || cfg.cor;
+    if(d.tipo === 'perimetro' && d.micro && P.microareasMap.has(d.micro)) {
+      const mInfo = P.microareasMap.get(d.micro);
+      if(mInfo) cor = mInfo.color;
+      if(microVisible[d.micro] === false) return;
+    }
+
+    L.geoJSON(d.geojson, {
+      style: {
+        color: cor,
+        weight: cfg.peso || 2,
+        opacity: .8,
+        dashArray: cfg.dash || d.tracejado || null,
+        fillColor: cor,
+        fillOpacity: isPoly ? .1 : 0
+      }
+    }).bindTooltip(d.nome || d.tipo, {
+      permanent: true, direction: 'center',
+      className: 'leaflet-tooltip',
+      sticky: false
+    }).addTo(layerPerims);
+  });
+}
+
+/* Malha IBGE */
+function renderIbge() {
+  if(!P.ibgeData) return;
+  L.geoJSON(P.ibgeData, {
+    style: { color:'#1e4d8c', weight:2, opacity:.7, fillOpacity:.03, dashArray:'6,4' }
+  }).addTo(layerIbge);
+}
+
+/* Landmarks */
+function renderLandmarks() {
+  (P.landmarks||[]).forEach(lm => {
+    const emoji = LM_CFG[lm.tipo] || '📍';
+    L.marker([lm.lat, lm.lng], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div style="font-size:18px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.7))">${emoji}</div>
+               ${lm.nome ? `<div style="font-size:9px;background:rgba(255,255,255,.9);color:#000;padding:0 3px;border-radius:2px;font-weight:700;text-align:center;white-space:nowrap;margin-top:1px">${lm.nome}</div>` : ''}`,
+        iconSize: [24, 30], iconAnchor: [12, 28]
+      })
+    }).bindTooltip(`${emoji} ${lm.nome || LM_CFG[lm.tipo] || 'Referência'}`, { direction:'top', offset:[0,-28] })
+      .addTo(layerLandmarks);
+  });
+}
+
+/* Labels do dicionário */
+function renderLabels() {
+  const dict = P.dictionary || [];
+  if(!dict.length) return;
+  const placed = [];
+  dict.forEach(d => {
+    const nome = (d.original || d.name || '').toUpperCase();
+    const pt = map.latLngToContainerPoint([d.lat, d.lng]);
+    const w = nome.length * 6 + 6;
+    const x = pt.x + 4, y = pt.y - 7;
+    const collide = placed.some(b => x < b.x+b.w && x+w > b.x && y < b.y+14 && y+14 > b.y);
+    if(collide) return;
+    placed.push({ x, y, w, h:14 });
+    L.marker([d.lat, d.lng], {
+      icon: L.divIcon({
+        className: '',
+        html: `<span style="color:#000;font-size:10px;font-weight:700;pointer-events:none;
+                            white-space:nowrap;text-shadow:1px 0 2px #fff,-1px 0 2px #fff,
+                            0 1px 2px #fff,0 -1px 2px #fff">${nome}</span>`,
+        iconSize:[1,1], iconAnchor:[-4,0]
+      }),
+      interactive: false
+    }).addTo(layerLabels);
+  });
+  map.off('zoomend', refreshLabels);
+  map.on('zoomend', refreshLabels);
+}
+
+function refreshLabels() {
+  layerLabels.clearLayers();
+  renderLabels();
+}
+
+/* ── LISTA DE MICROÁREAS ── */
+function renderMicroList() {
+  const list = document.getElementById('microList');
+  list.innerHTML = '';
+
+  /* Agrupar por equipe */
+  const groups = {};
+  P.microareasMap.forEach((v,k) => {
+    const team = k.includes('-') ? k.split('-')[0] : 'GERAL';
+    if(!groups[team]) groups[team] = [];
+    groups[team].push({ key:k, ...v });
+  });
+
+  const teams = Object.keys(groups).sort();
+  const multi = teams.length > 1;
+
+  teams.forEach(team => {
+    if(multi) {
+      const h = document.createElement('div');
+      h.style.cssText = 'color:var(--accent);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px 2px;padding-bottom:3px;border-bottom:1px solid var(--border)';
+      h.textContent = team;
+      list.appendChild(h);
+    }
+
+    groups[team].forEach(m => {
+      const lbl = m.key.includes('-') ? m.key.split('-')[1] : m.key;
+      const count = (P.data||[]).filter(d=>d.microarea===m.key && d.geocoded).length;
+      const vis = microVisible[m.key] !== false;
+
+      const item = document.createElement('div');
+      item.className = 'micro-item' + (vis ? '' : ' hidden');
+      item.style.setProperty('--micro-color', m.color);
+      item.innerHTML = `
+        <div class="micro-dot" style="background:${m.color}"></div>
+        <div class="micro-label">Micro ${lbl}</div>
+        <div class="micro-count">${count}</div>
+        <div class="micro-eye">${vis ? '👁️' : '🙈'}</div>`;
+
+      /* Clique na bolinha → centralizar */
+      item.querySelector('.micro-dot').onclick = e => {
+        e.stopPropagation();
+        fitMicro(m.key);
+      };
+      /* Clique no olho → toggle visibilidade */
+      item.querySelector('.micro-eye').onclick = e => {
+        e.stopPropagation();
+        microVisible[m.key] = !microVisible[m.key];
+        renderMicroList();
+        renderAll();
+        renderLegendContent();
+      };
+      /* Clique no item → centralizar */
+      item.onclick = () => fitMicro(m.key);
+
+      list.appendChild(item);
+    });
+  });
+}
+
+/* ── FUNÇÕES DE NAVEGAÇÃO ── */
+function fitAll() {
+  const pts = (P?.data||[]).filter(d=>d.geocoded && d.latitude);
+  if(!pts.length) return;
+  map.fitBounds(L.latLngBounds(pts.map(p=>[p.latitude,p.longitude])), { padding:[40,60] });
+}
+
+function fitMicro(key) {
+  const pts = (P?.data||[]).filter(d=>d.microarea===key && d.geocoded && d.latitude);
+  if(!pts.length) return;
+  map.fitBounds(L.latLngBounds(pts.map(p=>[p.latitude,p.longitude])), { padding:[60,80], maxZoom:16 });
+}
+
+function toggleAllMicros(show) {
+  P.microareasMap.forEach((_,k) => microVisible[k] = show);
+  renderMicroList();
+  renderAll();
+  renderLegendContent();
+}
+
+/* ── TILES ── */
+function setTile(type) {
+  if(type === 'sat') {
+    tileStreet.remove();
+    tileSat.addTo(map);
+    document.getElementById('tbSat').classList.add('active');
+    document.getElementById('tbStreet').classList.remove('active');
+    document.getElementById('chkSat').checked = true;
+  } else {
+    tileSat.remove();
+    tileStreet.addTo(map);
+    document.getElementById('tbStreet').classList.add('active');
+    document.getElementById('tbSat').classList.remove('active');
+    document.getElementById('chkSat').checked = false;
+  }
+}
+
+function toggleSat(v) { setTile(v ? 'sat' : 'street'); }
+function togglePoints(v)    { v ? layerPoints.addTo(map)    : map.removeLayer(layerPoints); }
+function togglePerims(v)    { v ? layerPerims.addTo(map)    : map.removeLayer(layerPerims); }
+function toggleIbge(v)      { v ? layerIbge.addTo(map)      : map.removeLayer(layerIbge); }
+function toggleLandmarks(v) { v ? layerLandmarks.addTo(map) : map.removeLayer(layerLandmarks); }
+function toggleLabels(v)    { v ? layerLabels.addTo(map)    : map.removeLayer(layerLabels); }
+
+/* ── LEGENDA FLUTUANTE ── */
+function toggleLegend() {
+  showLegend = !showLegend;
+  document.getElementById('mapLegend').style.display = showLegend ? 'block' : 'none';
+  document.getElementById('tbLegend').classList.toggle('active', showLegend);
+}
+
+function renderLegendContent() {
+  if(!P) return;
+  const el = document.getElementById('mapLegend');
+  el.innerHTML = '';
+
+  const groups = {};
+  P.microareasMap.forEach((v,k) => {
+    if(microVisible[k] === false) return;
+    const team = k.includes('-') ? k.split('-')[0] : 'GERAL';
+    if(!groups[team]) groups[team] = [];
+    groups[team].push({ key:k, ...v });
+  });
+
+  const teams = Object.keys(groups).sort();
+  teams.forEach(team => {
+    if(teams.length > 1) {
+      const h = document.createElement('div');
+      h.className = 'legend-team';
+      h.textContent = team;
+      el.appendChild(h);
+    }
+    groups[team].forEach(m => {
+      const lbl = m.key.includes('-') ? m.key.split('-')[1] : m.key;
+      const row = document.createElement('div');
+      row.className = 'legend-row';
+      row.innerHTML = `<div class="legend-dot" style="background:${m.color}"></div>
+                       <div class="legend-lbl">Micro ${lbl}</div>`;
+      row.onclick = () => fitMicro(m.key);
+      el.appendChild(row);
+    });
+  });
+}
+
+/* ── BUSCA ── */
+function initSearch() {
+  const input = document.getElementById('searchInput');
+  const results = document.getElementById('searchResults');
+  input.oninput = () => {
+    const q = input.value.trim().toLowerCase();
+    results.innerHTML = '';
+    if(q.length < 2) { results.style.display = 'none'; return; }
+
+    /* Buscar no dicionário */
+    const dictHits = (P.dictionary||[]).filter(d =>
+      (d.original||d.name||'').toLowerCase().includes(q)
+    ).slice(0,5);
+
+    /* Buscar em microáreas */
+    const microHits = [];
+    P.microareasMap.forEach((v,k) => {
+      if(k.toLowerCase().includes(q)) microHits.push({ key:k, ...v });
+    });
+
+    if(!dictHits.length && !microHits.length) {
+      results.style.display = 'none'; return;
+    }
+    results.style.display = 'block';
+
+    dictHits.forEach(d => {
+      const el = document.createElement('div');
+      el.style.cssText = 'padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11px;background:var(--panel);margin-bottom:3px';
+      el.textContent = '📍 ' + (d.original || d.name);
+      el.onclick = () => {
+        map.setView([d.lat, d.lng], 14);
+        results.style.display = 'none';
+        input.value = d.original || d.name;
+      };
+      results.appendChild(el);
+    });
+    microHits.forEach(m => {
+      const lbl = m.key.includes('-') ? m.key.split('-')[1] : m.key;
+      const el = document.createElement('div');
+      el.style.cssText = 'padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11px;background:var(--panel);margin-bottom:3px;display:flex;align-items:center;gap:6px';
+      el.innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:${m.color};flex-shrink:0;display:inline-block"></span>Micro ${lbl}`;
+      el.onclick = () => {
+        fitMicro(m.key);
+        results.style.display = 'none';
+        input.value = 'Micro ' + lbl;
+      };
+      results.appendChild(el);
+    });
+  };
+  /* Fechar ao clicar fora */
+  document.addEventListener('click', e => {
+    if(!document.getElementById('searchSection').contains(e.target))
+      results.style.display = 'none';
+  });
+}
+
+/* ── SIDEBAR TOGGLE ── */
+const toggle = document.getElementById('sidebarToggle');
+toggle.onclick = () => {
+  const sb = document.getElementById('sidebar');
+  const collapsed = sb.classList.toggle('collapsed');
+  toggle.textContent = collapsed ? '▶' : '◀';
+  /* Mover o botão junto com a sidebar */
+  toggle.style.left = collapsed ? '0px' : 'var(--sidebar-w)';
+  setTimeout(() => map.invalidateSize(), 320);
+};
+
+/* ── EXPORT PNG ── */
+async function captureMap() {
+  const mapEl = document.getElementById('map-container');
+  document.getElementById('toolbar').style.visibility = 'hidden';
+  document.getElementById('infoPanel').style.display = 'none';
+  await new Promise(r => setTimeout(r, 200));
+  try {
+    const canvas = await html2canvas(mapEl, {
+      useCORS:true, allowTaint:true, backgroundColor:'#000', scale:2
+    });
+    const a = document.createElement('a');
+    const d = new Date();
+    a.download = `mapa_${d.toISOString().split('T')[0]}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  } catch(e) {
+    alert('Erro ao capturar: ' + e.message);
+  } finally {
+    document.getElementById('toolbar').style.visibility = 'visible';
+  }
+}
+</script>
+</body>
+</html>
