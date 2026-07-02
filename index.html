@@ -735,25 +735,39 @@ function showInfo(group) {
   panel.style.display = 'block';
 }
 
+/* Paleta de fallback para perímetros sem cor própria — cores bem distintas entre si */
+const PERIM_PALETTE = [
+  '#e11d48','#2563eb','#16a34a','#f59e0b','#9333ea',
+  '#0891b2','#db2777','#65a30d','#ea580c','#4f46e5',
+  '#0d9488','#ca8a04','#be123c','#0284c7','#7c3aed'
+];
+function corFallbackMicro(key) {
+  let h = 0;
+  for(let i=0;i<key.length;i++) h = (h*31 + key.charCodeAt(i)) >>> 0;
+  return PERIM_PALETTE[h % PERIM_PALETTE.length];
+}
+
 /* Perímetros e obstáculos */
 function renderDrawings() {
   (P.drawings||[]).forEach(d => {
     const cfg = OBS_CFG[d.tipo] || OBS_CFG.outro;
     const isPoly = cfg.tipo === 'poligono';
 
-    /* Cor: perimetro herda da micro */
+    /* Cor: cada perímetro usa a cor própria da sua microárea (mesma da legenda/lista),
+       para ficar fácil diferenciar uma equipe da outra visualmente */
     let cor = d.cor || cfg.cor;
-    if(d.tipo === 'perimetro' && d.micro && P.microareasMap.has(d.micro)) {
-      const mInfo = P.microareasMap.get(d.micro);
-      if(mInfo) cor = mInfo.color;
+    if(d.tipo === 'perimetro' && d.micro) {
       if(microVisible[d.micro] === false) return;
+      const mInfo = P.microareasMap.has(d.micro) ? P.microareasMap.get(d.micro) : null;
+      cor = (mInfo && mInfo.color) ? mInfo.color : corFallbackMicro(d.micro);
     }
 
+    const isPerimetro = d.tipo === 'perimetro';
     const layer = L.geoJSON(d.geojson, {
       style: {
         color: cor,
-        weight: cfg.peso || 2,
-        opacity: .8,
+        weight: isPerimetro ? 3 : (cfg.peso || 2),
+        opacity: isPerimetro ? .9 : .8,
         dashArray: cfg.dash || d.tracejado || null,
         fillColor: cor,
         fillOpacity: isPoly ? .1 : 0
