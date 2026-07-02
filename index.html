@@ -749,7 +749,7 @@ function renderDrawings() {
       if(microVisible[d.micro] === false) return;
     }
 
-    L.geoJSON(d.geojson, {
+    const layer = L.geoJSON(d.geojson, {
       style: {
         color: cor,
         weight: cfg.peso || 2,
@@ -758,11 +758,18 @@ function renderDrawings() {
         fillColor: cor,
         fillOpacity: isPoly ? .1 : 0
       }
-    }).bindTooltip(d.nome || d.tipo, {
-      permanent: true, direction: 'center',
-      className: 'leaflet-tooltip',
-      sticky: false
     }).addTo(layerPerims);
+
+    /* Só o perímetro (contorno da microárea/equipe) recebe rótulo —
+       rios, córregos, matas e demais obstáculos ficam sem nome, para não poluir o mapa */
+    if(d.tipo === 'perimetro') {
+      const label = d.micro || d.nome || 'Equipe';
+      layer.bindTooltip(label, {
+        permanent: true, direction: 'center',
+        className: 'leaflet-tooltip',
+        sticky: false
+      });
+    }
   });
 }
 
