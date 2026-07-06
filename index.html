@@ -513,6 +513,16 @@
       <button class="btn btn-green" onclick="captureMap()">📸 Exportar PNG</button>
     </div>
 
+    <!-- Referências (landmarks) -->
+    <div class="section" id="landmarksSection" style="display:none">
+      <div class="section-title">🏥 Referências</div>
+      <div class="btn-row" style="margin-bottom:4px">
+        <button class="btn btn-secondary" style="font-size:10px;padding:5px 8px" onclick="toggleAllLandmarks(true)">👁️ Todas</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:5px 8px" onclick="toggleAllLandmarks(false)">🙈 Nenhuma</button>
+      </div>
+      <div id="landmarkList"></div>
+    </div>
+
     <!-- Microáreas -->
     <div class="section" id="microsSection" style="display:none">
       <div class="section-title">🎨 Microáreas</div>
@@ -574,6 +584,7 @@ let layerPoints, layerPerims, layerIbge, layerLandmarks, layerLabels;
 let showLegend = false;
 let showPoints = true; /* Toggle global de pontos */
 const microVisible = {};
+const lmVisible = {};  /* Visibilidade individual de landmarks */
 
 /* OBS_CONFIG para perímetros e obstáculos */
 const OBS_CFG = {
@@ -692,7 +703,7 @@ function removeProject(id) {
   delete projVisible[id];
   if(!projects.length) {
     P = null;
-    ['statsGrid','searchSection','layersSection','actionsSection','microsSection','projectsSection'].forEach(sid => {
+    ['statsGrid','searchSection','layersSection','actionsSection','landmarksSection','microsSection','projectsSection'].forEach(sid => {
       document.getElementById(sid).style.display = 'none';
     });
     document.getElementById('toolbar').style.display = 'none';
@@ -716,7 +727,13 @@ function toggleProject(id) {
   projVisible[id] = !projVisible[id];
   mergeProjects();
   P.microareasMap.forEach((v,k) => { if(!(k in microVisible)) microVisible[k] = true; });
+  (P.landmarks||[]).forEach((lm, i) => {
+    const key = lm._lmKey || `lm_${i}`;
+    lm._lmKey = key;
+    if(!(key in lmVisible)) lmVisible[key] = true;
+  });
   renderMicroList();
+  renderLandmarkList();
   renderAll();
   renderLegendContent();
   renderProjectsList();
@@ -772,14 +789,22 @@ function initProject() {
   document.getElementById('statTeams').textContent  = teams.length || 1;
 
   /* Mostrar seções */
-  ['statsGrid','searchSection','layersSection','actionsSection','microsSection','projectsSection'].forEach(id => {
+  ['statsGrid','searchSection','layersSection','actionsSection','landmarksSection','microsSection','projectsSection'].forEach(id => {
     document.getElementById(id).style.display = id === 'statsGrid' ? 'grid' : 'flex';
   });
   document.getElementById('toolbar').style.display = 'flex';
   document.getElementById('emptyState').style.display = 'none';
 
+  /* Inicializar visibilidade das landmarks */
+  (P.landmarks||[]).forEach((lm, i) => {
+    const key = lm._lmKey || `lm_${i}`;
+    lm._lmKey = key;
+    if(!(key in lmVisible)) lmVisible[key] = true;
+  });
+
   /* Renderizar */
   renderProjectsList();
+  renderLandmarkList();
   renderMicroList();
   renderAll();
   fitAll();
@@ -967,7 +992,9 @@ function renderIbge() {
 
 /* Landmarks */
 function renderLandmarks() {
-  (P.landmarks||[]).forEach(lm => {
+  (P.landmarks||[]).forEach((lm, i) => {
+    const lmKey = lm._lmKey || `lm_${i}`;
+    if(lmVisible[lmKey] === false) return;
     const emoji = LM_CFG[lm.tipo] || '📍';
     L.marker([lm.lat, lm.lng], {
       icon: L.divIcon({
@@ -1121,6 +1148,74 @@ function togglePerims(v)    { v ? layerPerims.addTo(map)    : map.removeLayer(la
 function toggleIbge(v)      { v ? layerIbge.addTo(map)      : map.removeLayer(layerIbge); }
 function toggleLandmarks(v) { v ? layerLandmarks.addTo(map) : map.removeLayer(layerLandmarks); }
 function toggleLabels(v)    { v ? layerLabels.addTo(map)    : map.removeLayer(layerLabels); }
+
+/* ── LISTA DE REFERÊNCIAS ── */
+function renderLandmarkList() {
+  const list = document.getElementById('landmarkList');
+  list.innerHTML = '';
+  const landmarks = P.landmarks || [];
+  if(!landmarks.length) {
+    document.getElementById('landmarksSection').style.display = 'none';
+    return;
+  }
+
+  /* Agrupar por tipo */
+  const groups = {};
+  landmarks.forEach((lm, i) => {
+    const key = lm._lmKey || `lm_${i}`;
+    lm._lmKey = key;
+    const tipo = lm.tipo || 'outro';
+    if(!groups[tipo]) groups[tipo] = [];
+    groups[tipo].push({ ...lm, _lmKey: key });
+  });
+
+  const tipoOrder = ['ubs','escola','igreja','praca','campo','cemiterio','comercio','outro'];
+  const tipoLabel = { ubs:'UBS', escola:'Escolas', igreja:'Igrejas', praca:'Praças', campo:'Campos', cemiterio:'Cemitérios', comercio:'Comércios', outro:'Outros' };
+  const tipos = tipoOrder.filter(t => groups[t]);
+
+  tipos.forEach(tipo => {
+    if(tipos.length > 1) {
+      const h = document.createElement('div');
+      h.style.cssText = 'color:var(--accent);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin:6px 0 3px 2px;padding-bottom:2px;border-bottom:1px solid var(--border)';
+      h.textContent = `${LM_CFG[tipo]||'📍'} ${tipoLabel[tipo]||tipo}`;
+      list.appendChild(h);
+    }
+
+    groups[tipo].forEach(lm => {
+      const vis = lmVisible[lm._lmKey] !== false;
+      const emoji = LM_CFG[lm.tipo] || '📍';
+      const item = document.createElement('div');
+      item.className = 'micro-item' + (vis ? '' : ' hidden');
+      item.style.setProperty('--micro-color', '#64748b');
+      item.innerHTML = `
+        <span style="font-size:14px;flex-shrink:0">${emoji}</span>
+        <div class="micro-label">${lm.nome || tipoLabel[lm.tipo] || 'Referência'}</div>
+        <div class="micro-eye">${vis ? '👁️' : '🙈'}</div>`;
+
+      item.querySelector('.micro-eye').onclick = e => {
+        e.stopPropagation();
+        lmVisible[lm._lmKey] = !lmVisible[lm._lmKey];
+        renderLandmarkList();
+        layerLandmarks.clearLayers();
+        renderLandmarks();
+      };
+      item.onclick = () => {
+        map.setView([lm.lat, lm.lng], 16);
+      };
+      list.appendChild(item);
+    });
+  });
+}
+
+function toggleAllLandmarks(show) {
+  (P.landmarks||[]).forEach((lm, i) => {
+    const key = lm._lmKey || `lm_${i}`;
+    lmVisible[key] = show;
+  });
+  renderLandmarkList();
+  layerLandmarks.clearLayers();
+  renderLandmarks();
+}
 
 /* ── LEGENDA FLUTUANTE ── */
 function toggleLegend() {
