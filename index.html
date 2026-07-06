@@ -512,6 +512,7 @@
         <button class="btn btn-secondary" onclick="toggleAllMicros(false)">🙈 Nenhuma</button>
       </div>
       <button class="btn btn-green" onclick="captureMap()">📸 Exportar PNG</button>
+      <button class="btn btn-purple" id="btnExportJson" style="display:none" onclick="exportMergedJson()">📦 Exportar JSON mesclado</button>
     </div>
 
     <!-- Referências (landmarks) -->
@@ -759,6 +760,7 @@ function renderProjectsList() {
     list.appendChild(el);
   });
   document.getElementById('projectsSection').style.display = projects.length ? 'flex' : 'none';
+  document.getElementById('btnExportJson').style.display = projects.length > 1 ? 'flex' : 'none';
 }
 
 function setLoading(v) {
@@ -1345,6 +1347,48 @@ async function captureMap() {
   } finally {
     document.getElementById('toolbar').style.visibility = 'visible';
   }
+}
+
+/* ── EXPORT JSON MESCLADO ── */
+function exportMergedJson() {
+  if(!P || !projects.length) return;
+
+  /* Limpar prefixos de projeto (P2:ESF05-03 → ESF05-03) e metadados internos */
+  const cleanKey = k => k.includes(':') ? k.split(':').pop() : k;
+
+  const merged = {
+    exportedAt: new Date().toISOString(),
+    sourceProjects: projects.map(p => p._projName),
+    data: (P.data||[]).map(d => {
+      const c = { ...d };
+      c.microarea = cleanKey(c.microarea || '');
+      delete c._projId;
+      return c;
+    }),
+    microareas: [...P.microareasMap].map(([k, v]) => [cleanKey(k), v]),
+    drawings: (P.drawings||[]).map(d => {
+      const c = { ...d };
+      if(c.micro) c.micro = cleanKey(c.micro);
+      delete c._projId;
+      return c;
+    }),
+    landmarks: (P.landmarks||[]).map(lm => {
+      const c = { ...lm };
+      delete c._projId;
+      delete c._lmKey;
+      return c;
+    }),
+    dictionary: P.dictionary || [],
+    ibgeData: P.ibgeData || null
+  };
+
+  const blob = new Blob([JSON.stringify(merged, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  const d = new Date();
+  a.download = `mapa_mesclado_${d.toISOString().split('T')[0]}.json`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 </script>
 </body>
