@@ -397,6 +397,50 @@
     100% { opacity:0; transform:scaleX(0); transform-origin:right; }
   }
 
+  /* ── PROJETO ITEM ── */
+  .proj-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11px;
+    margin-bottom: 4px;
+    transition: all .15s;
+  }
+  .proj-item:hover { background: rgba(255,255,255,.04); }
+  .proj-item .proj-name { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .proj-item .proj-stats { font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace; }
+  .proj-item .proj-eye {
+    font-size: 13px; opacity: .6; cursor: pointer; transition: opacity .1s;
+  }
+  .proj-item .proj-eye:hover { opacity: 1; }
+  .proj-item .proj-remove {
+    font-size: 11px; opacity: .4; cursor: pointer; transition: opacity .1s; color: var(--danger);
+  }
+  .proj-item .proj-remove:hover { opacity: 1; }
+  .proj-item.hidden { opacity: .35; }
+
+  /* ── PERIM LABELS (menores) ── */
+  .perim-label-tooltip {
+    background: rgba(0,0,0,.55) !important;
+    border: none !important;
+    border-radius: 4px !important;
+    color: #fff !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 8px !important;
+    font-weight: 600 !important;
+    padding: 1px 5px !important;
+    box-shadow: none !important;
+    letter-spacing: .3px;
+    white-space: nowrap;
+    pointer-events: none;
+    line-height: 1.3 !important;
+  }
+  .perim-label-tooltip::before { display: none !important; }
+
   /* ── SCROLLBAR ── */
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -419,10 +463,16 @@
     <!-- Carregar arquivo -->
     <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
       <div class="dz-icon">📂</div>
-      <b>Abrir projeto</b>
-      <p>Clique ou arraste o arquivo <code>.json</code></p>
+      <b>Abrir projeto(s)</b>
+      <p>Clique ou arraste um ou mais <code>.json</code></p>
     </div>
-    <input type="file" id="fileInput" accept=".json" style="display:none">
+    <input type="file" id="fileInput" accept=".json" multiple style="display:none">
+
+    <!-- Projetos carregados -->
+    <div class="section" id="projectsSection" style="display:none">
+      <div class="section-title">📁 Projetos carregados</div>
+      <div id="projectsList"></div>
+    </div>
 
     <!-- Estatísticas -->
     <div class="info-grid" id="statsGrid" style="display:none">
@@ -445,7 +495,7 @@
     <div class="section" id="layersSection" style="display:none">
       <div class="section-title">👁️ Camadas</div>
       <label class="switch-row"><input type="checkbox" id="chkSat" checked onchange="toggleSat(this.checked)"> 🛰️ Satélite</label>
-      <label class="switch-row"><input type="checkbox" id="chkPoints" checked onchange="togglePoints(this.checked)"> 🔵 Pontos</label>
+      <label class="switch-row"><input type="checkbox" id="chkPoints" checked onchange="togglePointsGlobal(this.checked)"> 🔵 Pontos (marcações)</label>
       <label class="switch-row"><input type="checkbox" id="chkPerims" checked onchange="togglePerims(this.checked)"> ⬡ Perímetros</label>
       <label class="switch-row"><input type="checkbox" id="chkIbge" checked onchange="toggleIbge(this.checked)"> 🗺️ Malha IBGE</label>
       <label class="switch-row"><input type="checkbox" id="chkLandmarks" checked onchange="toggleLandmarks(this.checked)"> 🏥 Referências</label>
@@ -515,10 +565,14 @@
    Lê arquivos .json do Sistema de Mapeamento APS
    ═══════════════════════════════════════════ */
 
-let P = null;         /* Projeto carregado */
+let P = null;         /* Projeto mesclado (virtual) */
+let projects = [];    /* Lista de projetos carregados */
+let projVisible = {}; /* Visibilidade por projeto */
+let projIdCounter = 0;
 let map, tileSat, tileStreet;
 let layerPoints, layerPerims, layerIbge, layerLandmarks, layerLabels;
 let showLegend = false;
+let showPoints = true; /* Toggle global de pontos */
 const microVisible = {};
 
 /* OBS_CONFIG para perímetros e obstáculos */
@@ -561,14 +615,17 @@ layerLabels    = L.layerGroup().addTo(map);
 map.on('click', ()=> document.getElementById('infoPanel').style.display='none');
 
 /* ── CARREGAR ARQUIVO ── */
-document.getElementById('fileInput').onchange = e => loadFile(e.target.files[0]);
+document.getElementById('fileInput').onchange = e => {
+  Array.from(e.target.files).forEach(f => loadFile(f));
+  e.target.value = ''; /* permite recarregar mesmo arquivo */
+};
 
 const dz = document.getElementById('dropZone');
 dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
 dz.addEventListener('dragleave', ()=> dz.classList.remove('over'));
 dz.addEventListener('drop', e => {
   e.preventDefault(); dz.classList.remove('over');
-  loadFile(e.dataTransfer.files[0]);
+  Array.from(e.dataTransfer.files).forEach(f => loadFile(f));
 });
 
 function loadFile(file) {
@@ -577,7 +634,29 @@ function loadFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      P = JSON.parse(e.target.result);
+      const raw = JSON.parse(e.target.result);
+      const id = ++projIdCounter;
+      const name = file.name.replace(/\.json$/i, '');
+      raw._projId = id;
+      raw._projName = name;
+      raw.microareasMap = new Map(raw.microareas || []);
+      /* Prefixar microáreas com projId para evitar conflitos entre projetos */
+      if(projects.length > 0) {
+        const oldMap = raw.microareasMap;
+        const newMap = new Map();
+        oldMap.forEach((v,k) => newMap.set(`P${id}:${k}`, v));
+        raw.microareasMap = newMap;
+        (raw.data||[]).forEach(d => { d.microarea = `P${id}:${d.microarea}`; d._projId = id; });
+        (raw.drawings||[]).forEach(d => { if(d.micro) d.micro = `P${id}:${d.micro}`; d._projId = id; });
+        (raw.landmarks||[]).forEach(d => d._projId = id);
+      } else {
+        (raw.data||[]).forEach(d => d._projId = id);
+        (raw.drawings||[]).forEach(d => d._projId = id);
+        (raw.landmarks||[]).forEach(d => d._projId = id);
+      }
+      projects.push(raw);
+      projVisible[id] = true;
+      mergeProjects();
       initProject();
     } catch(err) {
       alert('❌ Arquivo JSON inválido: ' + err.message);
@@ -585,6 +664,83 @@ function loadFile(file) {
     setLoading(false);
   };
   reader.readAsText(file);
+}
+
+function mergeProjects() {
+  /* Mesclar todos os projetos visíveis em P */
+  const visible = projects.filter(p => projVisible[p._projId] !== false);
+  P = {
+    data: [],
+    drawings: [],
+    landmarks: [],
+    dictionary: [],
+    ibgeData: null,
+    microareasMap: new Map()
+  };
+  visible.forEach(proj => {
+    P.data.push(...(proj.data||[]));
+    P.drawings.push(...(proj.drawings||[]));
+    P.landmarks.push(...(proj.landmarks||[]));
+    P.dictionary.push(...(proj.dictionary||[]));
+    if(proj.ibgeData && !P.ibgeData) P.ibgeData = proj.ibgeData;
+    proj.microareasMap.forEach((v,k) => P.microareasMap.set(k, v));
+  });
+}
+
+function removeProject(id) {
+  projects = projects.filter(p => p._projId !== id);
+  delete projVisible[id];
+  if(!projects.length) {
+    P = null;
+    ['statsGrid','searchSection','layersSection','actionsSection','microsSection','projectsSection'].forEach(sid => {
+      document.getElementById(sid).style.display = 'none';
+    });
+    document.getElementById('toolbar').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'flex';
+    document.getElementById('projectTitle').textContent = 'Nenhum projeto carregado';
+    layerPoints.clearLayers(); layerPerims.clearLayers(); layerIbge.clearLayers();
+    layerLandmarks.clearLayers(); layerLabels.clearLayers();
+    return;
+  }
+  mergeProjects();
+  /* Restaurar visibilidade das micros */
+  P.microareasMap.forEach((v,k) => { if(!(k in microVisible)) microVisible[k] = true; });
+  renderMicroList();
+  renderAll();
+  fitAll();
+  renderLegendContent();
+  renderProjectsList();
+}
+
+function toggleProject(id) {
+  projVisible[id] = !projVisible[id];
+  mergeProjects();
+  P.microareasMap.forEach((v,k) => { if(!(k in microVisible)) microVisible[k] = true; });
+  renderMicroList();
+  renderAll();
+  renderLegendContent();
+  renderProjectsList();
+}
+
+function renderProjectsList() {
+  const list = document.getElementById('projectsList');
+  list.innerHTML = '';
+  projects.forEach(proj => {
+    const vis = projVisible[proj._projId] !== false;
+    const pts = (proj.data||[]).filter(d=>d.geocoded).length;
+    const el = document.createElement('div');
+    el.className = 'proj-item' + (vis ? '' : ' hidden');
+    el.innerHTML = `
+      <span style="font-size:14px">📄</span>
+      <div class="proj-name" title="${proj._projName}">${proj._projName}</div>
+      <div class="proj-stats">${pts} pts</div>
+      <div class="proj-eye">${vis ? '👁️' : '🙈'}</div>
+      <div class="proj-remove" title="Remover projeto">✕</div>`;
+    el.querySelector('.proj-eye').onclick = () => toggleProject(proj._projId);
+    el.querySelector('.proj-remove').onclick = () => removeProject(proj._projId);
+    list.appendChild(el);
+  });
+  document.getElementById('projectsSection').style.display = projects.length ? 'flex' : 'none';
 }
 
 function setLoading(v) {
@@ -596,16 +752,18 @@ function setLoading(v) {
 function initProject() {
   if(!P) return;
 
-  /* Restaurar Map das microáreas */
-  P.microareasMap = new Map(P.microareas || []);
-
-  /* Visibilidade inicial */
-  P.microareasMap.forEach((v, k) => microVisible[k] = true);
+  /* Visibilidade inicial das novas microáreas */
+  P.microareasMap.forEach((v, k) => { if(!(k in microVisible)) microVisible[k] = true; });
 
   /* UI */
   const teams = [...new Set((P.data||[]).map(d=>d.team).filter(Boolean))];
-  document.getElementById('projectTitle').textContent =
-    teams.length ? teams.join(' + ') : 'Projeto sem nome';
+  if(projects.length === 1) {
+    document.getElementById('projectTitle').textContent =
+      teams.length ? teams.join(' + ') : projects[0]._projName;
+  } else {
+    document.getElementById('projectTitle').textContent =
+      `${projects.length} projetos · ${teams.length} equipes`;
+  }
 
   const geo = (P.data||[]).filter(d=>d.geocoded).length;
   document.getElementById('statPts').textContent    = (P.data||[]).length;
@@ -614,13 +772,14 @@ function initProject() {
   document.getElementById('statTeams').textContent  = teams.length || 1;
 
   /* Mostrar seções */
-  ['statsGrid','searchSection','layersSection','actionsSection','microsSection'].forEach(id => {
+  ['statsGrid','searchSection','layersSection','actionsSection','microsSection','projectsSection'].forEach(id => {
     document.getElementById(id).style.display = id === 'statsGrid' ? 'grid' : 'flex';
   });
   document.getElementById('toolbar').style.display = 'flex';
   document.getElementById('emptyState').style.display = 'none';
 
   /* Renderizar */
+  renderProjectsList();
   renderMicroList();
   renderAll();
   fitAll();
@@ -638,11 +797,15 @@ function renderAll() {
   layerLandmarks.clearLayers();
   layerLabels.clearLayers();
 
-  renderPoints();
+  if(showPoints) renderPoints();
   renderDrawings();
   renderIbge();
   renderLandmarks();
   renderLabels();
+}
+
+function renderPointsIfVisible() {
+  if(showPoints) { layerPoints.clearLayers(); renderPoints(); }
 }
 
 /* Pontos */
@@ -707,9 +870,9 @@ function renderPoints() {
     marker.addTo(layerPoints);
   });
 
-  /* Re-renderizar ao zoom */
-  map.off('zoomend', renderPoints);
-  map.on('zoomend', renderPoints);
+  /* Re-renderizar ao zoom (apenas se pontos visíveis) */
+  map.off('zoomend', renderPointsIfVisible);
+  map.on('zoomend', renderPointsIfVisible);
 }
 
 /* Mostrar info do ponto */
@@ -777,10 +940,17 @@ function renderDrawings() {
     /* Só o perímetro (contorno da microárea/equipe) recebe rótulo —
        rios, córregos, matas e demais obstáculos ficam sem nome, para não poluir o mapa */
     if(d.tipo === 'perimetro') {
-      const label = d.micro || d.nome || 'Equipe';
-      layer.bindTooltip(label, {
+      /* Extrair label curto: se tem prefixo de projeto (P2:ESF05-03), remove.
+         Mostra apenas a equipe abreviada, ex: "ESF05" ou micro "03" */
+      let rawLabel = d.micro || d.nome || 'Equipe';
+      /* Remove prefixo de projeto P1:, P2: etc */
+      if(rawLabel.includes(':')) rawLabel = rawLabel.split(':').pop();
+      /* Para perímetro de micro, mostra "equipe · micro", mais curto */
+      const parts = rawLabel.split('-');
+      const shortLabel = parts.length > 1 ? `${parts[0]} · ${parts[1]}` : rawLabel;
+      layer.bindTooltip(shortLabel, {
         permanent: true, direction: 'center',
-        className: 'leaflet-tooltip',
+        className: 'perim-label-tooltip',
         sticky: false
       });
     }
@@ -942,6 +1112,11 @@ function setTile(type) {
 
 function toggleSat(v) { setTile(v ? 'sat' : 'street'); }
 function togglePoints(v)    { v ? layerPoints.addTo(map)    : map.removeLayer(layerPoints); }
+function togglePointsGlobal(v) {
+  showPoints = v;
+  if(v) { layerPoints.addTo(map); renderPoints(); }
+  else { map.removeLayer(layerPoints); }
+}
 function togglePerims(v)    { v ? layerPerims.addTo(map)    : map.removeLayer(layerPerims); }
 function toggleIbge(v)      { v ? layerIbge.addTo(map)      : map.removeLayer(layerIbge); }
 function toggleLandmarks(v) { v ? layerLandmarks.addTo(map) : map.removeLayer(layerLandmarks); }
